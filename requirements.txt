@@ -1,0 +1,15 @@
+# ZentraGrid backend dependencies
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic[email]==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+telethon==1.38.1
+firebase-admin==6.6.0
+httpx==0.28.1
+python-json-logger==3.2.1
+
+# --- dev / test only (safe to keep, tiny) ---
+pytest==8.3.4
+pytest-asyncio==0.25.2
+anyio==4.8.0

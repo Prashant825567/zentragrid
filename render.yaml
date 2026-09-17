@@ -1,0 +1,64 @@
+services:
+  - type: web
+    name: zentragrid-api
+    runtime: python
+    plan: starter            # 'free' instances sleep and will drop MTProto sessions
+    region: singapore
+    branch: main
+    healthCheckPath: /health
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75
+    autoDeploy: true
+    envVars:
+      # ---------------- application ----------------
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: STORAGE_BACKEND
+        value: telegram
+      - key: CORS_ORIGINS
+        value: https://zentragrid.app,https://www.zentragrid.app
+      - key: AUTH_ALLOW_INSECURE_TOKENS
+        value: "false"
+
+      # ---------------- secrets (set in the Render dashboard) ----------------
+      # Never commit real values for any of the following.
+      - key: TG_API_ID
+        sync: false
+      - key: TG_API_HASH
+        sync: false
+      - key: TG_SESSION
+        sync: false
+      - key: TG_FILES_CHANNEL
+        sync: false
+      - key: TG_METADATA_CHANNEL
+        sync: false
+      - key: TG_OWNERS_CHANNEL
+        sync: false
+
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+
+      - key: API_KEY_PEPPER
+        generateValue: true
+
+      # ---------------- tunables ----------------
+      - key: MAX_UPLOAD_BYTES
+        value: "2147483648"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_UPLOAD_PER_MIN
+        value: "30"
+      - key: RATE_LIMIT_DOWNLOAD_PER_MIN
+        value: "120"
+      - key: RATE_LIMIT_STREAM_PER_MIN
+        value: "240"
+      - key: RATE_LIMIT_GENERAL_PER_MIN
+        value: "300"
