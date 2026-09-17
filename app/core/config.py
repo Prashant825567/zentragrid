@@ -130,9 +130,19 @@ class Settings(BaseSettings):
 
     @property
     def firebase_configured(self) -> bool:
+        """True when a full service-account credential is available."""
         return all(
             [self.FIREBASE_PROJECT_ID, self.FIREBASE_CLIENT_EMAIL, self.FIREBASE_PRIVATE_KEY]
         )
+
+    @property
+    def auth_configured(self) -> bool:
+        """True when ID tokens can be verified at all.
+
+        Only FIREBASE_PROJECT_ID is strictly required: without a service-account
+        key the backend verifies tokens against Google's public signing keys.
+        """
+        return bool(self.FIREBASE_PROJECT_ID) or self.AUTH_ALLOW_INSECURE_TOKENS
 
     def firebase_credentials_dict(self) -> dict:
         """Service-account shaped dict built from discrete env vars."""

@@ -148,9 +148,9 @@ Copy `.env.example` → `.env`. **Never commit `.env`.**
 | `TG_FILES_CHANNEL` | yes | e.g. `-100ZZZZZZZZZZ` |
 | `TG_METADATA_CHANNEL` | yes | |
 | `TG_OWNERS_CHANNEL` | yes | |
-| `FIREBASE_PROJECT_ID` | yes | `zentragrid` |
-| `FIREBASE_CLIENT_EMAIL` | yes | Service account email |
-| `FIREBASE_PRIVATE_KEY` | yes | **Secret** — `\n` escapes handled automatically |
+| `FIREBASE_PROJECT_ID` | yes | `zentragrid`. Alone this enables keyless (`jwks`) verification |
+| `FIREBASE_CLIENT_EMAIL` | no | Only for full Admin SDK mode |
+| `FIREBASE_PRIVATE_KEY` | no | **Secret** — only for Admin SDK mode. `\n` handled automatically |
 | `API_KEY_PEPPER` | yes | **Secret** — rotating it invalidates every API key |
 | `MAX_UPLOAD_BYTES` | no | Default 2 GiB |
 | `RATE_LIMIT_*_PER_MIN` | no | See §10 |
@@ -164,15 +164,27 @@ Copy `.env.example` → `.env`. **Never commit `.env`.**
 2. **Authentication → Sign-in method → Google → Enable.**
 3. **Authentication → Settings → Authorized domains:** add your frontend
    domain (and `localhost` for dev).
-4. **Project settings → Service accounts → Generate new private key.**
-   From the downloaded JSON take three fields:
-   - `project_id`   → `FIREBASE_PROJECT_ID`
-   - `client_email` → `FIREBASE_CLIENT_EMAIL`
-   - `private_key`  → `FIREBASE_PRIVATE_KEY`
+4. Set `FIREBASE_PROJECT_ID=zentragrid`. **That is all that is required.**
 
-The private key contains real newlines. Render env vars handle them, but if
-your tooling mangles them, paste it with literal `\n` escapes — `config.py`
-un-escapes it automatically.
+### Two verification modes
+
+ZentraGrid only ever *verifies* ID tokens — it never mints custom tokens or
+manages users. That needs Google's **public** signing keys, not a private one.
+
+| Mode | Requires | When |
+|---|---|---|
+| `jwks` | `FIREBASE_PROJECT_ID` | Default. Keyless verification against Google's published keys |
+| `admin` | + `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Optional. Needed only for custom tokens / user management / mid-life revocation checks |
+
+Both verify signature, issuer, audience and expiry. `jwks` mode is the right
+choice if your Google Cloud org policy
+(`iam.disableServiceAccountKeyCreation`) blocks key downloads — a common
+default on newer projects.
+
+To use `admin` mode: **Project settings → Service accounts → Generate new
+private key**, then take `client_email` and `private_key` from the JSON. The
+private key contains real newlines; literal `\n` escapes are un-escaped
+automatically by `config.py`.
 
 ---
 

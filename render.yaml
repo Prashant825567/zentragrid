@@ -39,8 +39,11 @@ services:
       - key: TG_OWNERS_CHANNEL
         sync: false
 
+      # Required. Alone this enables keyless (jwks) token verification.
       - key: FIREBASE_PROJECT_ID
         sync: false
+      # Optional - full Admin SDK mode only. Safe to leave unset, e.g. when the
+      # org policy blocks service-account key creation.
       - key: FIREBASE_CLIENT_EMAIL
         sync: false
       - key: FIREBASE_PRIVATE_KEY

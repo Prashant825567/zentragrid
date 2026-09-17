@@ -59,11 +59,17 @@ async def lifespan(app: FastAPI):
         if "*" in settings.CORS_ORIGINS:
             raise RuntimeError("Wildcard CORS is not allowed in production.")
 
-    # Initialise Firebase eagerly so misconfiguration fails fast at boot.
-    if settings.firebase_configured:
-        from app.auth.firebase import init_firebase
+    # Initialise auth eagerly so misconfiguration fails fast at boot.
+    from app.auth.firebase import auth_mode, init_firebase
 
+    mode = auth_mode()
+    if settings.is_production and mode not in {"admin", "jwks"}:
+        raise RuntimeError(
+            "FIREBASE_PROJECT_ID must be set in production so ID tokens can be verified."
+        )
+    if mode in {"admin", "jwks"}:
         init_firebase()
+    logger.info("auth_mode=%s", mode)
 
     storage = get_storage()
     try:

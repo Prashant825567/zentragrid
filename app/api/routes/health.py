@@ -22,14 +22,17 @@ async def health() -> dict:
 
 @router.get("/health/ready", summary="Readiness probe (checks dependencies)")
 async def readiness() -> dict:
+    from app.auth.firebase import auth_mode
     from app.telegram.client import healthcheck
 
     storage_status = await healthcheck()
-    ready = bool(storage_status.get("connected")) and (
-        settings.firebase_configured or settings.AUTH_ALLOW_INSECURE_TOKENS
-    )
+    mode = auth_mode()
+    ready = bool(storage_status.get("connected")) and mode != "unconfigured"
     return {
         "status": "ready" if ready else "degraded",
         "storage": storage_status,
-        "firebase_configured": settings.firebase_configured,
+        "auth_mode": mode,
+        "auth_ready": mode in {"admin", "jwks", "insecure"},
+        "firebase_project_id": settings.FIREBASE_PROJECT_ID or None,
+        "service_account_key": settings.firebase_configured,
     }

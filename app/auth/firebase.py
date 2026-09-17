@@ -37,6 +37,22 @@ class FirebaseIdentity:
     sign_in_provider: Optional[str] = None
 
 
+def auth_mode() -> str:
+    """Which verification strategy is active.
+
+    ``admin``    full Admin SDK (service-account key present)
+    ``jwks``     keyless verification against Google's public keys
+    ``insecure`` development bypass (never allowed in production)
+    """
+    if settings.firebase_configured:
+        return "admin"
+    if settings.FIREBASE_PROJECT_ID:
+        return "jwks"
+    if settings.AUTH_ALLOW_INSECURE_TOKENS and not settings.is_production:
+        return "insecure"
+    return "unconfigured"
+
+
 def init_firebase() -> None:
     """Initialise the Admin SDK once at application startup."""
     global _app, _initialised
@@ -44,15 +60,27 @@ def init_firebase() -> None:
         return
 
     if not settings.firebase_configured:
-        if settings.AUTH_ALLOW_INSECURE_TOKENS:
+        mode = auth_mode()
+        if mode == "jwks":
+            # Perfectly valid for our use case: verifying ID tokens only needs
+            # Google's public keys. Common when the org policy
+            # iam.disableServiceAccountKeyCreation blocks key downloads.
+            logger.info(
+                "firebase_keyless_mode project_id=%s (verifying via Google public keys)",
+                settings.FIREBASE_PROJECT_ID,
+            )
+            _initialised = True
+            return
+        if mode == "insecure":
             logger.warning(
                 "firebase_not_configured insecure_token_mode=on (development only)"
             )
             _initialised = True
             return
         raise ConfigurationError(
-            "Firebase Admin is not configured. Set FIREBASE_PROJECT_ID, "
-            "FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY."
+            "Firebase is not configured. Set FIREBASE_PROJECT_ID (required). "
+            "Optionally add FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY to use "
+            "the full Admin SDK."
         )
 
     import firebase_admin
@@ -95,22 +123,35 @@ def verify_id_token(id_token: str) -> FirebaseIdentity:
     if not id_token or not id_token.strip():
         raise InvalidFirebaseTokenError()
 
+    mode = auth_mode()
+
+    if mode == "unconfigured":
+        raise ConfigurationError(
+            "Firebase is not configured. Set FIREBASE_PROJECT_ID."
+        )
+
     # Development-only bypass: accept an unsigned JSON payload so the API can be
     # exercised without real Google credentials. Refuses to work in production.
-    if settings.AUTH_ALLOW_INSECURE_TOKENS and not settings.firebase_configured:
+    if mode == "insecure":
         if settings.is_production:
             raise ConfigurationError("Insecure token mode cannot be used in production.")
         return _verify_insecure(id_token)
 
     init_firebase()
 
-    from firebase_admin import auth as firebase_auth
+    if mode == "jwks":
+        # Keyless path: verify the JWT signature against Google's public keys.
+        from app.auth.jwks import verify_firebase_jwt
 
-    try:
-        claims = firebase_auth.verify_id_token(id_token, check_revoked=False)
-    except Exception as exc:
-        logger.info("firebase_token_rejected reason=%s", type(exc).__name__)
-        raise InvalidFirebaseTokenError() from exc
+        claims = verify_firebase_jwt(id_token, settings.FIREBASE_PROJECT_ID)
+    else:
+        from firebase_admin import auth as firebase_auth
+
+        try:
+            claims = firebase_auth.verify_id_token(id_token, check_revoked=False)
+        except Exception as exc:
+            logger.info("firebase_token_rejected reason=%s", type(exc).__name__)
+            raise InvalidFirebaseTokenError() from exc
 
     identity = _identity_from_claims(claims)
     if identity.sign_in_provider and identity.sign_in_provider not in {"google.com", "custom"}:
