@@ -48,6 +48,9 @@ class OwnerService:
         if not owner.profile_completed and (name or company):
             owner = await self._complete_if_possible(owner, name, company)
 
+        if owner.profile_completed:
+            await self.ensure_default_project(owner)
+
         logger.info(
             "owner_authenticated owner_id=%s new=%s profile_completed=%s",
             owner.owner_id,
@@ -75,8 +78,38 @@ class OwnerService:
         return await self._storage.owners.save(owner)
 
     async def complete_profile(self, owner: Owner, *, name: str, company: Optional[str]) -> Owner:
-        """Explicit profile completion step for a brand new owner."""
-        return await self._storage.owners.update_profile(owner, name=name, company=company)
+        """Explicit profile completion step for a brand new owner.
+
+        Also provisions a default project so the owner can create an API key
+        immediately after signup without a separate "create project" step.
+        """
+        owner = await self._storage.owners.update_profile(owner, name=name, company=company)
+        await self.ensure_default_project(owner)
+        return owner
+
+    async def ensure_default_project(self, owner: Owner):
+        """Create the owner's first project if they have none.
+
+        Idempotent: returns the existing project once one exists.
+        """
+        existing = await self._storage.projects.list_for_owner(owner.owner_id)
+        if existing:
+            return existing[0]
+
+        project = await self._storage.projects.create_project(
+            owner_id=owner.owner_id,
+            name=(owner.company or owner.name or "Default Project").strip()[:120],
+            description="Created automatically at signup.",
+        )
+        await self._storage.usage.get_or_create(
+            owner_id=owner.owner_id, project_id=project.project_id
+        )
+        logger.info(
+            "default_project_created owner_id=%s project_id=%s",
+            owner.owner_id,
+            project.project_id,
+        )
+        return project
 
     async def get_profile(self, owner: Owner) -> Owner:
         return owner

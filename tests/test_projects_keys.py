@@ -24,7 +24,10 @@ def test_create_and_list_projects(client, owner_headers, signed_up_owner):
 
     listed = client.get("/v1/projects", headers=owner_headers)
     assert listed.status_code == 200
-    assert len(listed.json()["projects"]) == 1
+    # A default project is provisioned at signup, plus the one created above.
+    names = [p["name"] for p in listed.json()["projects"]]
+    assert "My Video App" in names
+    assert len(names) == 2
 
 
 def test_duplicate_project_name_conflicts(client, owner_headers, project):

@@ -62,6 +62,7 @@ async def upload_file(
         content_type=file.content_type,
         declared_size=int(declared) if declared and declared.isdigit() else None,
         metadata=_parse_metadata(metadata),
+        key_id=principal.key_id,
     )
     request.state.file_id = record.file_id
     return FileUploadResponse(

@@ -32,6 +32,8 @@ class FileRecord(BaseModel):
     size: int
     status: str = STATUS_ACTIVE
     telegram_message_id: Optional[int] = None
+    # Which API key performed the upload. Answers "kis key se aayi thi?"
+    uploaded_by_key_id: Optional[str] = None
     checksum: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=utc_now_iso)
@@ -46,6 +48,7 @@ class FileRecord(BaseModel):
             mime_type=self.mime_type,
             size=self.size,
             status=self.status,
+            uploaded_by_key_id=self.uploaded_by_key_id,
             metadata=self.metadata,
             created_at=self.created_at,
             updated_at=self.updated_at,
@@ -60,6 +63,7 @@ class FilePublic(BaseModel):
     mime_type: str
     size: int
     status: str
+    uploaded_by_key_id: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str
     updated_at: str

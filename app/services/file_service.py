@@ -46,6 +46,7 @@ class FileService:
         content_type: Optional[str],
         declared_size: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
+        key_id: Optional[str] = None,
     ) -> FileRecord:
         safe_name = sanitize_filename(filename)
         mime_type = guess_mime_type(safe_name, content_type)
@@ -81,6 +82,7 @@ class FileService:
                 mime_type=mime_type,
                 size=stored.size or size,
                 telegram_message_id=stored.message_id,
+                uploaded_by_key_id=key_id,
                 checksum=checksum,
                 metadata=clean_metadata,
             )
@@ -88,9 +90,10 @@ class FileService:
             await self._usage.record_upload(project, record.size)
 
             logger.info(
-                "file_uploaded project_id=%s file_id=%s size=%s",
+                "file_uploaded project_id=%s file_id=%s key_id=%s size=%s",
                 project.project_id,
                 record.file_id,
+                key_id or "-",
                 record.size,
             )
             return record
