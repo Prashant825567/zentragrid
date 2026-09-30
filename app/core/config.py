@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     TG_OWNERS_CHANNEL: Optional[str] = None
 
     # Telethon download/upload tuning
-    TG_CHUNK_SIZE: int = 512 * 1024  # must divide 1MiB and be a multiple of 4096
+    # Must divide 1 MiB and be a multiple of 4096. 1 MiB is Telegram's maximum
+    # request size and measured fastest: 256K=0.54 MB/s, 512K=1.40, 1M=1.56.
+    TG_CHUNK_SIZE: int = 1024 * 1024
     TG_CONNECT_TIMEOUT: int = 30
 
     # ------------------------------------------------------------- storage

@@ -12,6 +12,8 @@ Design notes
 from __future__ import annotations
 
 import logging
+import time
+from collections import OrderedDict
 from typing import Any, AsyncIterator, Optional
 
 from app.core.config import settings
@@ -23,6 +25,52 @@ logger = logging.getLogger("zentragrid.telegram.files")
 
 ALIGNMENT = 4096
 
+# ---------------------------------------------------------------- media cache
+#
+# Every ranged read needs the message's media object before a single byte can
+# be fetched. Resolving it costs a full round-trip to Telegram (~0.2s measured),
+# which a video player pays on *every* seek and buffer request.
+#
+# The media reference (file id + access hash) is stable for the lifetime of the
+# message, so it is safe to cache. If Telegram ever rejects a stale reference we
+# drop the entry and resolve once more — see ``_media_for``.
+_MEDIA_CACHE: "OrderedDict[tuple[str, int], tuple[float, Any]]" = OrderedDict()
+_MEDIA_CACHE_MAX = 512
+_MEDIA_CACHE_TTL = 1800  # 30 minutes
+
+# Telethon raises these when a cached file reference is no longer accepted.
+_STALE_REFERENCE_MARKERS = ("FILE_REFERENCE", "FILEREF", "LOCATION_INVALID")
+
+
+def _is_stale_reference(exc: Exception) -> bool:
+    name = type(exc).__name__.upper()
+    text = str(exc).upper()
+    return any(m in name or m in text for m in _STALE_REFERENCE_MARKERS)
+
+
+def _cache_get(key: "tuple[str, int]") -> Optional[Any]:
+    entry = _MEDIA_CACHE.get(key)
+    if entry is None:
+        return None
+    stored_at, media = entry
+    if (time.monotonic() - stored_at) > _MEDIA_CACHE_TTL:
+        _MEDIA_CACHE.pop(key, None)
+        return None
+    _MEDIA_CACHE.move_to_end(key)
+    return media
+
+
+def _cache_put(key: "tuple[str, int]", media: Any) -> None:
+    _MEDIA_CACHE[key] = (time.monotonic(), media)
+    _MEDIA_CACHE.move_to_end(key)
+    while len(_MEDIA_CACHE) > _MEDIA_CACHE_MAX:
+        _MEDIA_CACHE.popitem(last=False)
+
+
+def invalidate_media_cache(label: str, message_id: int) -> None:
+    """Drop a cached media reference (called after delete, or on a stale ref)."""
+    _MEDIA_CACHE.pop((label, message_id), None)
+
 
 def _normalise_chunk_size(value: int) -> int:
     """Telegram wants a chunk size that is a multiple of 4 KiB and divides 1 MiB."""
@@ -31,6 +79,23 @@ def _normalise_chunk_size(value: int) -> int:
         if value <= size:
             return size
     return allowed[-1]
+
+
+def _pick_chunk_size(offset: int, limit: Optional[int]) -> int:
+    """Choose a chunk size that suits the size of *this* read.
+
+    Big sequential reads want the largest chunk Telegram allows (measured:
+    256K=0.54 MB/s, 512K=1.40, 1M=1.56). But a player asking for 64 KB should
+    not wait for a whole 1 MiB to arrive — that turns a fast seek into a slow
+    one. So small reads get a small chunk, large reads get the configured max.
+    """
+    configured = _normalise_chunk_size(settings.TG_CHUNK_SIZE)
+    if limit is None:
+        return configured
+
+    # Account for bytes discarded before ``offset`` due to 4 KiB alignment.
+    needed = limit + (offset - (max(offset, 0) // ALIGNMENT) * ALIGNMENT)
+    return min(configured, _normalise_chunk_size(needed))
 
 
 class TelegramMediaChannel(MediaChannel):
@@ -93,6 +158,28 @@ class TelegramMediaChannel(MediaChannel):
         )
 
     # ----------------------------------------------------------- download
+    async def _media_for(self, message_id: int, *, refresh: bool) -> Any:
+        """Resolve a message's media object, using the cache when possible.
+
+        Skipping this round-trip is what makes repeated range requests (video
+        seeking) fast — it is otherwise paid on every single request.
+        """
+        key = (self._label, message_id)
+        if not refresh:
+            cached = _cache_get(key)
+            if cached is not None:
+                return cached
+
+        client = await get_client()
+        entity = await self._entity()
+        message = await client.get_messages(entity, ids=message_id)
+        if not message or not getattr(message, "media", None):
+            invalidate_media_cache(self._label, message_id)
+            raise FileNotFoundError_("The underlying stored object no longer exists.")
+
+        _cache_put(key, message.media)
+        return message.media
+
     async def iter_download(
         self, message_id: int, *, offset: int = 0, limit: Optional[int] = None
     ) -> AsyncIterator[bytes]:
@@ -100,22 +187,52 @@ class TelegramMediaChannel(MediaChannel):
         client = await get_client()
         entity = await self._entity()
 
-        message = await client.get_messages(entity, ids=message_id)
-        if not message or not getattr(message, "media", None):
-            raise FileNotFoundError_("The underlying stored object no longer exists.")
+        media = await self._media_for(message_id, refresh=False)
 
-        chunk_size = _normalise_chunk_size(settings.TG_CHUNK_SIZE)
+        chunk_size = _pick_chunk_size(offset, limit)
         aligned_offset = (max(offset, 0) // ALIGNMENT) * ALIGNMENT
         skip = offset - aligned_offset
         remaining = limit
 
-        try:
-            async for chunk in client.iter_download(
-                message.media,
+        def _open(media_obj: Any):
+            # NOTE: Telethon's RequestIter.__aiter__ RESETS the stream, so the
+            # iterator must be obtained exactly once and then driven with
+            # __anext__. Using `async for` on it after a manual __anext__ would
+            # silently replay the first chunk.
+            return client.iter_download(
+                media_obj,
                 offset=aligned_offset,
                 chunk_size=chunk_size,
                 request_size=chunk_size,
-            ):
+            ).__aiter__()
+
+        try:
+            iterator = _open(media)
+            try:
+                first = await iterator.__anext__()
+            except StopAsyncIteration:
+                return
+            except Exception as exc:
+                if not _is_stale_reference(exc):
+                    raise
+                # Cached reference went stale: resolve once more and retry.
+                logger.info("media_reference_refreshed message_id=%s", message_id)
+                media = await self._media_for(message_id, refresh=True)
+                iterator = _open(media)
+                try:
+                    first = await iterator.__anext__()
+                except StopAsyncIteration:
+                    return
+
+            async def _chunks() -> AsyncIterator[bytes]:
+                yield first
+                while True:
+                    try:
+                        yield await iterator.__anext__()
+                    except StopAsyncIteration:
+                        return
+
+            async for chunk in _chunks():
                 if skip:
                     if len(chunk) <= skip:
                         skip -= len(chunk)
@@ -147,6 +264,7 @@ class TelegramMediaChannel(MediaChannel):
         except Exception as exc:
             logger.error("media_delete_failed message_id=%s error=%s", message_id, type(exc).__name__)
             raise StorageBackendError("Failed to delete file from storage.") from exc
+        invalidate_media_cache(self._label, message_id)
         logger.info("media_deleted message_id=%s", message_id)
 
     async def exists(self, message_id: int) -> bool:
