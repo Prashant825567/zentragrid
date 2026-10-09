@@ -111,12 +111,16 @@ In the Render dashboard → your service → **Environment**, set every variable
 marked `sync: false`:
 
 ```
-TG_API_ID              37144075
+TG_API_ID              <your api id from my.telegram.org>
 TG_API_HASH            <your api hash>
 TG_SESSION             <your NEW rotated session string>
 TG_OWNERS_CHANNEL      -100XXXXXXXXXX
 TG_METADATA_CHANNEL    -100YYYYYYYYYY
 TG_FILES_CHANNEL       -100ZZZZZZZZZZ
+
+# Optional - dedicated channel for the document store. Leave unset and
+# documents share TG_METADATA_CHANNEL.
+TG_DATA_CHANNEL        -100WWWWWWWWWW
 
 FIREBASE_PROJECT_ID    zentragrid
 

@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     TG_FILES_CHANNEL: Optional[str] = None
     TG_METADATA_CHANNEL: Optional[str] = None
     TG_OWNERS_CHANNEL: Optional[str] = None
+    # Document store. Falls back to the METADATA channel when unset so the
+    # data API works without provisioning a fourth channel, but a dedicated
+    # channel is recommended: it keeps file metadata and user documents apart
+    # and makes each index warm faster.
+    TG_DATA_CHANNEL: Optional[str] = None
 
     # Telethon download/upload tuning
     # Must divide 1 MiB and be a multiple of 4096. 1 MiB is Telegram's maximum
@@ -73,6 +78,17 @@ class Settings(BaseSettings):
         default_factory=lambda: [".exe", ".bat", ".cmd", ".com", ".scr", ".msi"]
     )
 
+    # ----------------------------------------------------------- documents
+    # A Telegram text message caps at 4096 UTF-16 code units. Documents whose
+    # JSON fits below DOC_INLINE_MAX_BYTES live directly in a record message
+    # (fast: served straight from the in-memory index). Anything larger is
+    # transparently spilled into the media channel as a blob and loaded on
+    # demand, which is what makes long notes possible at all.
+    DOC_INLINE_MAX_BYTES: int = 3000
+    MAX_DOCUMENT_BYTES: int = 1024 * 1024  # 1 MiB, same ceiling as Firestore
+    MAX_COLLECTION_NAME_LENGTH: int = 64
+    MAX_QUERY_FILTERS: int = 8
+
     # -------------------------------------------------------- rate limiting
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_UPLOAD_PER_MIN: int = 30
@@ -80,11 +96,14 @@ class Settings(BaseSettings):
     RATE_LIMIT_STREAM_PER_MIN: int = 240
     RATE_LIMIT_GENERAL_PER_MIN: int = 300
     RATE_LIMIT_DASHBOARD_PER_MIN: int = 120
+    RATE_LIMIT_DATA_READ_PER_MIN: int = 600
+    RATE_LIMIT_DATA_WRITE_PER_MIN: int = 180
 
     # --------------------------------------------------------------- plans
     DEFAULT_PLAN: str = "free"
     DEFAULT_PLAN_MAX_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GiB
     DEFAULT_PLAN_MAX_FILES: int = 10_000
+    DEFAULT_PLAN_MAX_DOCUMENTS: int = 50_000
 
     @field_validator("CORS_ORIGINS", "ALLOWED_MIME_TYPES", "BLOCKED_EXTENSIONS", mode="before")
     @classmethod

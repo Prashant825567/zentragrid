@@ -1,6 +1,10 @@
 # ZentraGrid — saare routes aur unka kaam
 
-Total 21 routes. Teen groups: public, dashboard (Firebase token), developer (API key).
+Total 29 routes. Teen groups: public, dashboard (Firebase token), developer (API key).
+
+Developer group ke do hisse hain:
+* **Files** — `/v1/files/...` (blob upload / download / stream)
+* **Data** — `/v1/data/...` aur `/v1/collections` (Firestore jaisa JSON document store)
 
 ---
 

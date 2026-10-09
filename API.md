@@ -35,6 +35,14 @@ Two auth schemes:
 | `DELETE` | `/v1/files/{file_id}` | API key | Delete |
 | `GET` | `/v1/files/{file_id}/download` | API key | Download (streamed) |
 | `GET` | `/v1/files/{file_id}/stream` | API key | Stream with Range support |
+| `GET` | `/v1/collections` | API key | List collections in this project |
+| `POST` | `/v1/data/{collection}` | API key | Create a document |
+| `GET` | `/v1/data/{collection}` | API key | List / filter / sort / paginate |
+| `POST` | `/v1/data/{collection}/query` | API key | Same, as a JSON body |
+| `GET` | `/v1/data/{collection}/{doc_id}` | API key | Read a document |
+| `PUT` | `/v1/data/{collection}/{doc_id}` | API key | Create or replace |
+| `PATCH` | `/v1/data/{collection}/{doc_id}` | API key | Recursive merge |
+| `DELETE` | `/v1/data/{collection}/{doc_id}` | API key | Delete a document |
 
 ---
 
@@ -299,6 +307,129 @@ players just request the next one. Unsatisfiable → `416`.
 
 ---
 
+## Data (document store)
+
+A schemaless JSON datastore with the same mental model as Firestore:
+**collection → document**. No schema, no migrations, no SQL. The project is
+derived from the API key, so one key can never read another project's data.
+
+### Storage model
+
+A document is stored as JSON. If the encoded body is **≤ 3 KB** it lives
+inline in a record and is served straight from the in-memory index (no I/O).
+Anything larger is transparently spilled to blob storage and fetched on
+demand. Callers never see the difference — the only observable effect is that
+very large documents are slower to filter on.
+
+| Limit | Value | Env var |
+|---|---|---|
+| Inline threshold | 3 KB | `DOC_INLINE_MAX_BYTES` |
+| Max document size | 1 MiB | `MAX_DOCUMENT_BYTES` |
+| Max documents per project | 50 000 | `DEFAULT_PLAN_MAX_DOCUMENTS` |
+| Max filters per query | 8 | `MAX_QUERY_FILTERS` |
+
+Collection names and document ids must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`.
+Omit the id on create and one is generated (`doc_…`).
+
+### `POST /v1/data/{collection}`
+
+Create a document. `409 DOCUMENT_ALREADY_EXISTS` if the id is taken.
+
+```json
+// request
+{ "data": { "title": "Shopping list", "done": false, "views": 3 },
+  "id": "note-1" }
+
+// 201
+{ "id": "note-1", "collection": "notes", "rev": 1, "size": 69,
+  "created_at": "2026-10-09T09:12:44Z", "updated_at": "2026-10-09T09:12:44Z",
+  "data": { "title": "Shopping list", "done": false, "views": 3 } }
+```
+
+### `PUT /v1/data/{collection}/{doc_id}`
+
+Create or **fully replace**. Fields absent from `data` are dropped.
+
+### `PATCH /v1/data/{collection}/{doc_id}`
+
+**Recursive merge.** Nested objects merge; arrays and scalars replace.
+
+```json
+// stored: { "title": "t", "meta": { "pinned": false, "tags": ["a"] } }
+{ "data": { "meta": { "pinned": true } } }
+// result: { "title": "t", "meta": { "pinned": true, "tags": ["a"] } }
+```
+
+### Optimistic concurrency
+
+Every write bumps `rev`. Pass `expected_rev` on `PUT`/`PATCH` to make the
+write conditional — if another writer got there first you get
+`409 REVISION_CONFLICT` instead of silently clobbering them.
+
+```json
+{ "data": { "views": 11 }, "expected_rev": 4 }
+```
+
+### `GET /v1/data/{collection}` — querying
+
+| Param | Meaning |
+|---|---|
+| `where` | `field:op:value`, repeatable, ANDed together |
+| `order_by` | Dotted field path; defaults to `created_at` |
+| `desc` | `true` to reverse |
+| `limit` | 1–200, default 50 |
+| `cursor` | Opaque token from `next_cursor` |
+
+Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, `nin`, `contains`,
+`starts_with`, `ends_with`, `exists`.
+
+Values are parsed as JSON when possible, so `views:gte:30` compares
+numerically. Quote to force a string: `zip:eq:"110001"`.
+Field paths are dotted: `where=author.name:eq:Rahul`.
+
+```
+GET /v1/data/notes?where=done:eq:true&where=views:gte:5&order_by=views&desc=true&limit=20
+```
+
+```json
+{ "documents": [ { "id": "note-1", "rev": 2, "data": { … } } ],
+  "next_cursor": "eyJ2IjoxMCwiaSI6Im5vdGUtMSJ9" }
+```
+
+Unknown operators return `400 INVALID_QUERY` rather than silently matching
+nothing.
+
+### `POST /v1/data/{collection}/query`
+
+The same query as a JSON body, for filters that are awkward in a URL:
+
+```json
+{ "where": [ { "field": "tags", "op": "contains", "value": "work" },
+             { "field": "views", "op": "gte", "value": 10 } ],
+  "order_by": "views", "desc": true, "limit": 20 }
+```
+
+### `GET /v1/collections`
+
+```json
+{ "collections": [ { "name": "notes", "document_count": 3 } ] }
+```
+
+Collections are implicit: they exist while they hold documents and vanish
+when emptied. There is nothing to create or delete.
+
+### Query semantics worth knowing
+
+* A document **missing** the filtered field never matches `eq`, but does
+  match `ne` and `nin` — normal schemaless behaviour.
+* Comparing incompatible types (`"abc" > 5`) never errors; it just does not
+  match. One odd record cannot 500 a whole collection.
+* `true` is not equal to `1`, unlike plain Python.
+* Sorting is total across mixed types, so pagination stays stable even in a
+  collection with inconsistent shapes.
+
+---
+
 ## Rate limits
 
 Per API key, per operation class. Configurable via env.
@@ -310,6 +441,8 @@ Per API key, per operation class. Configurable via env.
 | Stream | `RATE_LIMIT_STREAM_PER_MIN` | 240 |
 | General | `RATE_LIMIT_GENERAL_PER_MIN` | 300 |
 | Dashboard (per Firebase UID) | `RATE_LIMIT_DASHBOARD_PER_MIN` | 120 |
+| Data read | `RATE_LIMIT_DATA_READ_PER_MIN` | 600 |
+| Data write | `RATE_LIMIT_DATA_WRITE_PER_MIN` | 180 |
 
 Exceeded → `429` with `Retry-After`. These are starting points, not tuned
 production values. Counters are per process — with N Render instances the

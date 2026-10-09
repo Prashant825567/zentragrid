@@ -38,6 +38,9 @@ services:
         sync: false
       - key: TG_OWNERS_CHANNEL
         sync: false
+      # Optional. Unset -> the document store shares the METADATA channel.
+      - key: TG_DATA_CHANNEL
+        sync: false
 
       # Required. Alone this enables keyless (jwks) token verification.
       - key: FIREBASE_PROJECT_ID
@@ -65,3 +68,15 @@ services:
         value: "240"
       - key: RATE_LIMIT_GENERAL_PER_MIN
         value: "300"
+      - key: RATE_LIMIT_DATA_READ_PER_MIN
+        value: "600"
+      - key: RATE_LIMIT_DATA_WRITE_PER_MIN
+        value: "180"
+
+      # ---------------- document store ----------------
+      - key: DOC_INLINE_MAX_BYTES
+        value: "3000"
+      - key: MAX_DOCUMENT_BYTES
+        value: "1048576"
+      - key: DEFAULT_PLAN_MAX_DOCUMENTS
+        value: "50000"

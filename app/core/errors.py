@@ -63,6 +63,16 @@ class InvalidFileError(BadRequestError):
     message = "The uploaded file is invalid."
 
 
+class InvalidQueryError(BadRequestError):
+    code = "INVALID_QUERY"
+    message = "The query could not be parsed."
+
+
+class InvalidDocumentError(BadRequestError):
+    code = "INVALID_DOCUMENT"
+    message = "The document body is invalid."
+
+
 # --------------------------------------------------------------------- 401
 class UnauthorizedError(ZentraGridError):
     status_code = status.HTTP_401_UNAUTHORIZED
@@ -125,6 +135,16 @@ class ApiKeyNotFoundError(NotFoundError):
     message = "The requested API key does not exist."
 
 
+class DocumentNotFoundError(NotFoundError):
+    code = "DOCUMENT_NOT_FOUND"
+    message = "The requested document does not exist."
+
+
+class CollectionNotFoundError(NotFoundError):
+    code = "COLLECTION_NOT_FOUND"
+    message = "The requested collection does not exist."
+
+
 # --------------------------------------------------------------------- 409
 class ConflictError(ZentraGridError):
     status_code = status.HTTP_409_CONFLICT
@@ -135,6 +155,16 @@ class ConflictError(ZentraGridError):
 class DuplicateOwnerError(ConflictError):
     code = "OWNER_ALREADY_EXISTS"
     message = "An owner with this email already exists."
+
+
+class DocumentExistsError(ConflictError):
+    code = "DOCUMENT_ALREADY_EXISTS"
+    message = "A document with this id already exists in the collection."
+
+
+class RevisionConflictError(ConflictError):
+    code = "REVISION_CONFLICT"
+    message = "The document was modified by another write. Re-read and retry."
 
 
 # --------------------------------------------------------------------- 413
@@ -148,6 +178,18 @@ class QuotaExceededError(ZentraGridError):
     status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
     code = "QUOTA_EXCEEDED"
     message = "Storage quota exceeded for this project."
+
+
+class DocumentTooLargeError(ZentraGridError):
+    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    code = "DOCUMENT_TOO_LARGE"
+    message = "The document exceeds the maximum allowed size."
+
+
+class DocumentQuotaExceededError(ZentraGridError):
+    status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    code = "DOCUMENT_QUOTA_EXCEEDED"
+    message = "Document quota exceeded for this project."
 
 
 # --------------------------------------------------------------------- 416

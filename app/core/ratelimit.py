@@ -66,6 +66,8 @@ def limit_for(operation: str) -> int:
         "download": settings.RATE_LIMIT_DOWNLOAD_PER_MIN,
         "stream": settings.RATE_LIMIT_STREAM_PER_MIN,
         "dashboard": settings.RATE_LIMIT_DASHBOARD_PER_MIN,
+        "data_read": settings.RATE_LIMIT_DATA_READ_PER_MIN,
+        "data_write": settings.RATE_LIMIT_DATA_WRITE_PER_MIN,
     }.get(operation, settings.RATE_LIMIT_GENERAL_PER_MIN)
 
 

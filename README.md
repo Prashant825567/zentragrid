@@ -2,11 +2,17 @@
 
 **Developer storage infrastructure API for startups.**
 
-Upload, download, stream, rename and delete files through a clean REST API.
-Owners sign in with Google (Firebase Auth), issue API keys per project, and
-their developers use those keys against the file endpoints.
+Two products behind one API key:
 
-There is **no SQL/NoSQL application database**. All persistence lives in three
+1. **File storage** — upload, download, stream, rename and delete files.
+2. **Document store** — a schemaless JSON datastore shaped like Firestore
+   (collection → document) with filtering, sorting, pagination and optimistic
+   concurrency. This is where app data lives: notes, profiles, posts, settings.
+
+Owners sign in with Google (Firebase Auth), issue API keys per project, and
+their developers use those keys against both endpoint families.
+
+There is **no SQL/NoSQL application database**. All persistence lives in
 private Telegram channels behind repository abstractions, so the storage layer
 can be swapped later without touching business logic.
 
@@ -87,8 +93,17 @@ All three must be **private** channels the session account belongs to.
 | **FILES** | `TG_FILES_CHANNEL` | Raw uploaded blobs (images, video, PDFs, assets) |
 | **METADATA** | `TG_METADATA_CHANNEL` | One JSON record per file, pointing at the FILES message id |
 | **OWNERS** | `TG_OWNERS_CHANNEL` | Owner records, projects, API-key metadata, plans, quotas, usage |
+| **DATA** *(optional)* | `TG_DATA_CHANNEL` | One JSON record per document in the document store |
 
 Raw media is never mixed with owner metadata.
+
+`TG_DATA_CHANNEL` is optional. Leave it unset and documents share the METADATA
+channel — correct, because records are keyed by `record_type`, but both indexes
+then scan the same history at boot. Set it once you have real document volume.
+
+Documents larger than `DOC_INLINE_MAX_BYTES` (3 KB) are spilled into the FILES
+channel as a `.json` blob and the record keeps only a pointer; this is
+invisible to API callers.
 
 **Deletion semantics differ per channel** — worth knowing when you inspect them:
 
@@ -148,11 +163,15 @@ Copy `.env.example` → `.env`. **Never commit `.env`.**
 | `TG_FILES_CHANNEL` | yes | e.g. `-100ZZZZZZZZZZ` |
 | `TG_METADATA_CHANNEL` | yes | |
 | `TG_OWNERS_CHANNEL` | yes | |
+| `TG_DATA_CHANNEL` | no | Document store. Falls back to the METADATA channel |
 | `FIREBASE_PROJECT_ID` | yes | `zentragrid`. Alone this enables keyless (`jwks`) verification |
 | `FIREBASE_CLIENT_EMAIL` | no | Only for full Admin SDK mode |
 | `FIREBASE_PRIVATE_KEY` | no | **Secret** — only for Admin SDK mode. `\n` handled automatically |
 | `API_KEY_PEPPER` | yes | **Secret** — rotating it invalidates every API key |
 | `MAX_UPLOAD_BYTES` | no | Default 2 GiB |
+| `DOC_INLINE_MAX_BYTES` | no | Default 3 KB — above this a document spills to a blob |
+| `MAX_DOCUMENT_BYTES` | no | Default 1 MiB hard ceiling per document |
+| `DEFAULT_PLAN_MAX_DOCUMENTS` | no | Default 50 000 documents per project |
 | `RATE_LIMIT_*_PER_MIN` | no | See §10 |
 | `AUTH_ALLOW_INSECURE_TOKENS` | no | Dev only. Boot fails if `true` in production |
 
@@ -302,7 +321,7 @@ STORAGE_BACKEND=memory AUTH_ALLOW_INSECURE_TOKENS=true uvicorn app.main:app --re
 ### Tests
 
 ```bash
-pytest -q          # 86 tests, no Telegram/Firebase credentials needed
+pytest -q          # 219 tests, no Telegram/Firebase credentials needed
 ```
 
 ### Real end-to-end check against your Telegram channels
@@ -325,6 +344,14 @@ To upload files and **keep** them so you can see them in Telegram:
 
 ```bash
 python scripts/demo_keep.py
+```
+
+Document store against live Telegram — including a **cold rebuild** that wipes
+the in-process index and proves every document reloads byte-identical from the
+channel alone:
+
+```bash
+python scripts/data_e2e_test.py     # 35 checks, cleans up after itself
 ```
 
 ---
@@ -495,6 +522,40 @@ MVP is a simple indexed filename lookup: `GET /v1/files?query=video`. It reads
 the in-memory index, never scanning the storage channel. The repository
 abstraction is where a real search index or cache plugs in later.
 
+### Data (document store)
+
+For everything that is *not* a file. Same API key, same project isolation.
+
+```bash
+# create a note (id optional — omit it and one is generated)
+curl -X POST https://zentragrid.onrender.com/v1/data/notes \
+  -H "Authorization: Bearer ZTG_live_..." -H "Content-Type: application/json" \
+  -d '{"id":"note-1","data":{"title":"Shopping list","done":false,"views":3}}'
+
+# merge a field (nested objects merge, arrays replace)
+curl -X PATCH .../v1/data/notes/note-1 \
+  -H "Authorization: Bearer ZTG_live_..." -H "Content-Type: application/json" \
+  -d '{"data":{"done":true,"meta":{"src":"mobile"}}}'
+
+# query: done=true, 5+ views, newest-read first
+curl ".../v1/data/notes?where=done:eq:true&where=views:gte:5&order_by=views&desc=true"
+
+# what collections exist?
+curl .../v1/collections
+```
+
+Operators: `eq ne lt lte gt gte in nin contains starts_with ends_with exists`.
+Field paths are dotted (`author.name`). Filters are ANDed.
+
+Every write bumps `rev`; pass `expected_rev` to make a write conditional and
+get `409 REVISION_CONFLICT` instead of silently overwriting a concurrent
+update.
+
+Collections are implicit — they exist while they hold documents and disappear
+when emptied. Nothing to create, nothing to migrate.
+
+Full reference with semantics and edge cases: **`API.md` → Data**.
+
 ---
 
 ## 12. Security considerations
@@ -538,6 +599,15 @@ abstraction is where a real search index or cache plugs in later.
   hit `FloodWaitError` on the account. Add a queue/retry layer before scaling.
 - Files above Telegram's per-file ceiling (2 GB, 4 GB with Premium) need
   client-side chunking into multiple parts.
+- **Document store**: queries are evaluated in memory over a project's
+  collection, so they are fast but linear — fine into the tens of thousands of
+  documents, not a substitute for a real indexed database at millions. There
+  are no secondary indexes, no joins, no aggregations, and no transactions
+  across documents (single-document writes are serialised and `expected_rev`
+  gives optimistic concurrency).
+- Documents above 3 KB spill to a blob, so **filtering on a large document is
+  slower** than on a small one — keep queried fields in small documents and
+  push bulk text into a field you do not filter on.
 
 ---
 
@@ -547,3 +617,11 @@ abstraction is where a real search index or cache plugs in later.
 **46/46 checks passed**, including a 207 KB JPEG uploaded, downloaded and
 verified byte-identical by SHA-256, plus mid-file Range seeks returning exact
 byte slices.
+
+`scripts/data_e2e_test.py` — **35/35 checks passed** against live Telegram:
+inline and blob documents, replace/merge/revision conflicts, filters, sorting,
+cursor pagination, project isolation, and a **cold index rebuild** proving a
+23 KB document reloads byte-identical from the channel after the in-process
+index is wiped.
+
+`pytest -q` — **219 offline tests**, no credentials required.
