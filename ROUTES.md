@@ -1,6 +1,6 @@
 # ZentraGrid — saare routes aur unka kaam
 
-Total 29 routes. Teen groups: public, dashboard (Firebase token), developer (API key).
+Total 31 routes. Teen groups: public, dashboard (Firebase token), developer (API key).
 
 Developer group ke do hisse hain:
 * **Files** — `/v1/files/...` (blob upload / download / stream)
@@ -276,6 +276,13 @@ Streamed download. Poori file RAM me kabhi nahi aati.
 ### `GET /v1/files/{file_id}/stream`
 Video streaming, Range support.
 
+### `GET /v1/files/{file_id}/public-link`
+Permanent public download link banata hai (idempotent — same file = same URL).
+
+### `GET /dl/{file_id}?sig=…` — PUBLIC, no auth
+Signed direct-download link. Browser me paste karo, Enter dabao, download shuru.
+Signature = file_id ka HMAC; tamper kiya to 403 `INVALID_SIGNATURE`.
+
 ```
 HTTP/1.1 206 Partial Content
 Accept-Ranges: bytes
@@ -323,7 +330,7 @@ Har error bilkul ye shape me:
 |---|---|
 | 400 | `BAD_REQUEST`, `VALIDATION_ERROR`, `INVALID_FILE` |
 | 401 | `UNAUTHORIZED`, `INVALID_ID_TOKEN`, `INVALID_API_KEY`, `REVOKED_API_KEY` |
-| 403 | `FORBIDDEN`, `PROFILE_INCOMPLETE` |
+| 403 | `FORBIDDEN`, `PROFILE_INCOMPLETE`, `INVALID_SIGNATURE` |
 | 404 | `NOT_FOUND`, `FILE_NOT_FOUND`, `PROJECT_NOT_FOUND`, `OWNER_NOT_FOUND`, `API_KEY_NOT_FOUND` |
 | 409 | `CONFLICT`, `OWNER_ALREADY_EXISTS` |
 | 413 | `PAYLOAD_TOO_LARGE`, `QUOTA_EXCEEDED` |

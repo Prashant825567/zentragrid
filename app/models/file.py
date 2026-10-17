@@ -90,3 +90,12 @@ class FileDeleted(BaseModel):
     id: str
     status: str = STATUS_DELETED
     deleted: bool = True
+
+
+class FilePublicLink(BaseModel):
+    """A permanent, signature-protected download URL usable without headers."""
+
+    file_id: str
+    url: str
+    signature: str
+    permanent: bool = True

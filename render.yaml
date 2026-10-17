@@ -41,6 +41,15 @@ services:
       # Optional. Unset -> the document store shares the METADATA channel.
       - key: TG_DATA_CHANNEL
         sync: false
+      # Optional. HMAC material for public /dl links. Unset -> derived from
+      # TG_SESSION (fine for a single deployment; rotating the session then
+      # invalidates issued links).
+      - key: PUBLIC_LINK_SECRET
+        sync: false
+      # Optional. Canonical origin used when generating public links.
+      - key: PUBLIC_BASE_URL
+        value: https://zentragrid.onrender.com
+        sync: false
 
       # Required. Alone this enables keyless (jwks) token verification.
       - key: FIREBASE_PROJECT_ID

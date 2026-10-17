@@ -321,7 +321,7 @@ STORAGE_BACKEND=memory AUTH_ALLOW_INSECURE_TOKENS=true uvicorn app.main:app --re
 ### Tests
 
 ```bash
-pytest -q          # 219 tests, no Telegram/Firebase credentials needed
+pytest -q          # 234 tests, no Telegram/Firebase credentials needed
 ```
 
 ### Real end-to-end check against your Telegram channels
@@ -624,4 +624,4 @@ cursor pagination, project isolation, and a **cold index rebuild** proving a
 23 KB document reloads byte-identical from the channel after the in-process
 index is wiped.
 
-`pytest -q` — **219 offline tests**, no credentials required.
+`pytest -q` — **234 offline tests**, no credentials required.

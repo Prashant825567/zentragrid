@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     # Pepper used when hashing API keys. Rotating it invalidates all keys.
     API_KEY_PEPPER: str = "change-me-in-production"
     API_KEY_PREFIX: str = "ZTG_live_"
+    # HMAC material for permanent public download links (/dl/{id}?sig=…).
+    # Empty = derived from TG_SESSION, so links survive deploys without any
+    # extra configuration. Rotating either invalidates all issued links.
+    PUBLIC_LINK_SECRET: str = ""
+    # Canonical public origin used when generating links. Empty = derived
+    # from the incoming request's base URL.
+    PUBLIC_BASE_URL: str = ""
 
     # --------------------------------------------------------------- files
     MAX_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GiB

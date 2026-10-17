@@ -291,6 +291,31 @@ players just request the next one. Unsatisfiable → `416`.
 
 ---
 
+### `GET /v1/files/{file_id}/public-link`
+
+Permanent public download link (API key se ek baar maango, link ke baad header ki zaroorat nahi).
+
+```json
+{
+  "file_id": "file_zxhy…",
+  "url": "https://zentragrid.onrender.com/dl/file_zxhy…?sig=46604…",
+  "signature": "46604…",
+  "permanent": true
+}
+```
+
+Idempotent: signature `file_id` ka HMAC-SHA256 (32 hex chars) hai, isliye same
+file ka link hamesha same rehta hai. Signing secret (`PUBLIC_LINK_SECRET`, ya
+uski absence me `TG_SESSION`) rotate karne par saare links invalid — dobara
+issue kar lo, free hai.
+
+### `GET /dl/{file_id}?sig=…` — public route, no auth
+
+Signed link se direct download. Browser me paste karte hi download shuru
+(`Content-Disposition: attachment`). Galat/adhoori signature → 403
+`INVALID_SIGNATURE`; deleted/unknown file → 404. Range support nahi (poori
+file stream hoti hai) — video playback ke liye authenticated `/stream` use karo.
+
 ## Usage
 
 ### `GET /v1/projects/{project_id}/usage`

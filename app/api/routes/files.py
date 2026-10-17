@@ -19,10 +19,13 @@ from app.models.file import (
     FileDeleted,
     FileList,
     FilePublic,
+    FilePublicLink,
     FileRename,
     FileUploadResponse,
 )
+from app.core.config import settings
 from app.services.file_service import FileService
+from app.services.public_links import sign_file_id
 from app.services.streaming_service import StreamingService
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -156,4 +159,30 @@ async def stream_file(
         status_code=status_code,
         media_type=record.mime_type,
         headers=headers,
+    )
+
+
+@router.get(
+    "/{file_id}/public-link",
+    response_model=FilePublicLink,
+    summary="Get a permanent public download link (browser-pasteable)",
+)
+async def public_link(
+    file_id: str,
+    request: Request,
+    principal: ApiPrincipal = Depends(rate_limited("general")),
+    storage: Storage = Depends(storage_dep),
+) -> FilePublicLink:
+    """Idempotent: the signature is an HMAC of the file id, so calling this
+    repeatedly always yields the same URL. The link needs no auth header —
+    anyone holding it can download the file until the signing secret rotates.
+    """
+    record = await FileService(storage).get(principal.project, file_id)
+    signature = sign_file_id(record.file_id)
+    base = (settings.PUBLIC_BASE_URL or str(request.base_url)).rstrip("/")
+    return FilePublicLink(
+        file_id=record.file_id,
+        url=f"{base}/dl/{record.file_id}?sig={signature}",
+        signature=signature,
+        permanent=True,
     )
